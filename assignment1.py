@@ -1,52 +1,76 @@
 import pandas as pd
-import plotly.express as px
-from statsmodels.tsa.api import ExponentialSmoothing, SimpleExpSmoothing
-# Define URLs for training and test data
-train_data_url = "https://github.com/dustywhite7/econ8310-assignment1/raw/main/assignment_data_train.csv"
-test_data_url = "https://github.com/dustywhite7/econ8310-assignment1/raw/main/assignment_data_test.csv"
+import numpy as np
+from statsmodels.tsa.api import ExponentialSmoothing
+from statsmodels.tsa.statespace.varmax import VARMAX
+import pickle
 
-# Load the training dataset
-train_df = pd.read_csv(train_data_url)
+# Load training data
+train_url = "https://github.com/dustywhite7/econ8310-assignment1/raw/main/assignment_data_train.csv"
+train_data = pd.read_csv(train_url)
 
-# Load the test dataset
-test_df = pd.read_csv(test_data_url)
+# Ensure correct timestamp column name
+if 'Timestamp' in train_data.columns:
+    train_data.rename(columns={'Timestamp': 'timestamp'}, inplace=True)
 
-# Convert 'Timestamp' columns to datetime
-train_df['Timestamp'] = pd.to_datetime(train_df['Timestamp'])
-test_df['Timestamp'] = pd.to_datetime(test_df['Timestamp'])
+# Convert timestamp column to datetime format and set as index
+train_data['timestamp'] = pd.to_datetime(train_data['timestamp'])
+train_data.set_index('timestamp', inplace=True)
 
-# Set 'Timestamp' as the index
-train_df.set_index('Timestamp', inplace=True)
-test_df.set_index('Timestamp', inplace=True)
+# Ensure dataset follows an hourly frequency
+train_data = train_data.asfreq('h')
 
-# Plot the training data
-px.line(train_df, x=train_df.index, y='trips', title="Hourly Taxi Trips (Training Data)")
-# Define the model using Exponential Smoothing
-model = ExponentialSmoothing(
-    train_df['trips'],          # Target variable
-    trend="add",                # Additive trend
-    seasonal="add",             # Additive seasonality
-    seasonal_periods=24         # 24-hour daily seasonality
-)
-# Fit the model
+# Select the dependent variable (number of taxi trips)
+y_train = train_data['trips']
+
+# === OPTION 1: Exponential Smoothing Model === #
+model = ExponentialSmoothing(y_train, seasonal='add', seasonal_periods=24)
 modelFit = model.fit()
 
-# Print the model summary
-print(modelFit.summary())
-# Forecast for the test period (744 hours in January)
+# Save the trained model
+with open("model.pkl", "wb") as f:
+    pickle.dump(modelFit, f)
+
+# Load test data
+test_url = "https://github.com/dustywhite7/econ8310-assignment1/raw/main/assignment_data_test.csv"
+test_data = pd.read_csv(test_url)
+
+# Ensure correct timestamp column name in test data
+if 'Timestamp' in test_data.columns:
+    test_data.rename(columns={'Timestamp': 'timestamp'}, inplace=True)
+
+# Convert test timestamp column to datetime format and set as index
+test_data['timestamp'] = pd.to_datetime(test_data['timestamp'])
+test_data.set_index('timestamp', inplace=True)
+test_data = test_data.asfreq('h')
+
+# Forecast for 744 hours (January of next year)
 pred = modelFit.forecast(steps=744)
 
-# Convert predictions into a DataFrame
-forecast_df = pd.DataFrame({
-    'Timestamp': pd.date_range(start='2019-01-01', periods=744, freq='H'),
-    'Forecasted Trips': pred
-})
-# Combine actual and forecasted data
-comparison_df = pd.DataFrame({
-    'Actual Trips': test_df['trips'].values,
-    'Forecasted Trips': pred.values
-}, index=test_df.index)
+# Save predictions
+pred.to_csv("predictions.csv")
 
-# Plot actual vs forecasted trips
-px.line(comparison_df, title="Actual vs Forecasted Taxi Trips")
+print("Model training and prediction completed successfully!")
 
+import matplotlib.pyplot as plt
+
+# Load predictions
+pred = pd.read_csv("predictions.csv", index_col=0)
+pred.index = pd.to_datetime(pred.index)
+
+# Plot the predictions
+plt.figure(figsize=(12, 5))
+plt.plot(pred, label="Predicted Trips", color='blue')
+plt.title("Forecasted Number of Taxi Trips")
+plt.xlabel("Time")
+plt.ylabel("Number of Trips")
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(12, 5))
+plt.plot(y_train[-500:], label="Actual Trips (Training)", color='black')  # Last 500 hours of training data
+plt.plot(pred, label="Predicted Trips", color='blue')
+plt.title("Actual vs Forecasted Taxi Trips")
+plt.xlabel("Time")
+plt.ylabel("Number of Trips")
+plt.legend()
+plt.show()
